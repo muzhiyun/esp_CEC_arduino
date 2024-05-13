@@ -1,16 +1,20 @@
+//form https://github.com/johnboiles/CEC
 #include "CEC_Device.h"
 
-CEC_Device::CEC_Device() :
-	_promiscuous(false),
-	_monitorMode(true),
-	_logicalAddress(-1),
-	_receiveBufferBits(0),
-	_transmitBufferBytes(0),
-	_bitStartTime(0),
-	_lineSetTime(0),
-	_waitTime(0),
-	_amLastTransmittor(false),
-	_state(CEC_IDLE)
+CEC_Device::CEC_Device(unsigned int num) :
+    _cecpinnum(num),
+    _cectype(CEC_Device::CDT_PLAYBACK_DEVICE),
+    _cecphysicalAddress(0x2000),
+    _promiscuous(false),
+    _monitorMode(true),
+    _logicalAddress(-1),
+    _receiveBufferBits(0),
+    _transmitBufferBytes(0),
+    _bitStartTime(0),
+    _lineSetTime(0),
+    _waitTime(0),
+    _amLastTransmittor(false),
+    _state(CEC_IDLE)
 {
 }
 
@@ -33,7 +37,8 @@ void CEC_Device::Initialize(int physicalAddress, CEC_DEVICE_TYPE type, bool prom
 	case CDT_AUDIO_SYSTEM:     _validLogicalAddresses = valid_LogicalAddressesAudio; break;
 	default:                   _validLogicalAddresses = NULL;
 	}
-
+	_cecphysicalAddress = physicalAddress;
+	_cectype = type;
 	_promiscuous = promiscuous;
 	_monitorMode = monitorMode;
 	_physicalAddress = physicalAddress & 0xffff;
@@ -374,7 +379,7 @@ bool CEC_Device::Transmit(int sourceAddress, int targetAddress, const unsigned c
 		return false; // packet too big
 
 	_transmitBuffer[0] = (sourceAddress << 4) | (targetAddress & 0xf);
-	for (int i = 0; i < count; i++)
+	for (unsigned int i = 0; i < count; i++)
 		_transmitBuffer[i+1] = buffer[i];
 	_transmitBufferBytes = count + 1;
 	_xmitretry = 0;
@@ -387,4 +392,79 @@ bool CEC_Device::TransmitFrame(int targetAddress, const unsigned char* buffer, i
 		return false;
 
 	return Transmit(_logicalAddress, targetAddress, buffer, count);
+}
+
+bool CEC_Device::LineState()
+{
+	int state = digitalRead(_cecpinnum);
+	return state != LOW;
+}
+
+void CEC_Device::SetLineState(bool state)
+{
+	if (state) {
+		pinMode(_cecpinnum, INPUT_PULLUP);
+	} else {
+		digitalWrite(_cecpinnum, LOW);
+		pinMode(_cecpinnum, OUTPUT);
+	}
+}
+
+void CEC_Device::OnReady(int logicalAddress)
+{
+	// This is called after the logical address has been allocated
+	unsigned char highByte = static_cast<unsigned char>(_cecphysicalAddress >> 8);
+    unsigned char lowByte = static_cast<unsigned char>(_cecphysicalAddress & 0xFF);
+
+    unsigned char buf[4] = {0x84, highByte, lowByte, static_cast<unsigned char>(_cectype)};
+
+	DbgPrint("Device ready, Logical address assigned: %d\n", logicalAddress);
+
+	TransmitFrame(0xf, buf, 4); // <Report Physical Address>
+}
+
+void CEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
+{
+	// This is called when a frame is received.  To transmit
+	// a frame call TransmitFrame.  To receive all frames, even
+	// those not addressed to this device, set Promiscuous to true.
+	unsigned char highByte = static_cast<unsigned char>(_cecphysicalAddress >> 8);
+    unsigned char lowByte = static_cast<unsigned char>(_cecphysicalAddress & 0xFF);
+
+	DbgPrint("Packet received at %ld: %02X", millis(), buffer[0]);
+	for (int i = 1; i < count; i++)
+		DbgPrint(":%02X", buffer[i]);
+	if (!ack)
+		DbgPrint(" NAK");
+	DbgPrint("\n");
+
+	// Ignore messages not sent to us
+	if ((buffer[0] & 0xf) != LogicalAddress())
+		return;
+
+	// No command received?
+	if (count < 2)
+		return;
+
+	switch (buffer[1]) {
+	case 0x83: { // <Give Physical Address>
+		unsigned char buf[4] = {0x84, highByte, lowByte, static_cast<unsigned char>(_cectype)};
+		TransmitFrame(0xf, buf, 4); // <Report Physical Address>
+		break;
+	}
+	case 0x8c: // <Give Device Vendor ID>
+		TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
+		break;
+	}
+}
+
+void CEC_Device::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
+{
+	// This is called after a frame is transmitted.
+	DbgPrint("Packet sent at %ld: %02X", millis(), buffer[0]);
+	for (int i = 1; i < count; i++)
+		DbgPrint(":%02X", buffer[i]);
+	if (!ack)
+		DbgPrint(" NAK");
+	DbgPrint("\n");
 }

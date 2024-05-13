@@ -1,7 +1,9 @@
+//form https://github.com/johnboiles/CEC
 #ifndef CEC_DEVICE_H__
 #define CEC_DEVICE_H__
 
-#include "Common.h"
+#include <Arduino.h>
+#define DbgPrint Serial.printf
 
 class CEC_Device
 {
@@ -16,22 +18,25 @@ public:
 	} CEC_DEVICE_TYPE;
 
 public:
-	CEC_Device();
+	CEC_Device(unsigned int pinnum);
 	void Initialize(int physicalAddress, CEC_DEVICE_TYPE type, bool promiscuous = false, bool monitorMode = false);
 	bool TransmitFrame(int targetAddress, const unsigned char* buffer, int count);
 	void Run();
 
 protected:
-	virtual bool LineState() = 0;
-	virtual void SetLineState(bool) = 0;
-	virtual void OnTransmitComplete(unsigned char* buffer, int count, bool ack) = 0;
-	virtual void OnReceiveComplete(unsigned char* buffer, int count, bool ack) = 0;
-	virtual void OnReady(int logicalAddress) = 0;
+	bool LineState();
+	void SetLineState(bool);
+	void OnTransmitComplete(unsigned char* buffer, int count, bool ack);
+	void OnReceiveComplete(unsigned char* buffer, int count, bool ack);
+	void OnReady(int logicalAddress);
 
 private:
 	bool Transmit(int sourceAddress, int targetAddress, const unsigned char* buffer, unsigned int count);
 
 private:
+	unsigned int _cecpinnum;
+	CEC_DEVICE_TYPE _cectype;
+	int _cecphysicalAddress;
 	bool _promiscuous;
 	bool _monitorMode;
 
